@@ -1,0 +1,56 @@
+# Builds the 30-day and 90-day Common Intelligence Picture files from the
+# newest master export. See .github/scripts/cip_filter.py for the rules.
+#
+# Runs:
+#   - whenever a new master export is pushed,
+#   - once a day, so old events age out even on days with no new export,
+#   - on demand: Actions tab > "CIP filtered pulls" > Run workflow.
+#
+# It commits only when the filtered files actually changed.
+
+name: CIP filtered pulls
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ArcGIS Data for ATAK (KMZs)/Common Intelligence Picture/Master Database/**"
+      - ".github/scripts/cip_filter.py"
+      - ".github/workflows/cip-filtered-pulls.yml"
+  schedule:
+    - cron: "17 10 * * *" # 10:17 UTC = early morning Eastern
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cip-filtered-pulls
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Build filtered files
+        run: python3 .github/scripts/cip_filter.py
+
+      - name: Commit if changed
+        run: |
+          CIP="ArcGIS Data for ATAK (KMZs)/Common Intelligence Picture"
+          git add -- "$CIP/30-Day Pulls" "$CIP/90-Day Pulls"
+          if git diff --cached --quiet; then
+            echo "Filtered files unchanged; nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update CIP 30/90-day pulls"
+          # If a new export landed while this ran, put our commit on top of it.
+          git pull --rebase origin main
+          git push origin HEAD:main
